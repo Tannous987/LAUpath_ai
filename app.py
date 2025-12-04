@@ -15,6 +15,8 @@ from uuid import uuid4
 
 import streamlit as st
 from dotenv import load_dotenv
+
+from streamlit_modal import Modal
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
@@ -22,7 +24,7 @@ from langchain.agents import create_agent
 from langchain.tools import tool
 
 # Import custom tools
-from tools import analyze_student_profile, recommend_major
+from tools import analyze_student_profile, recommend_major, get_course_map
 
 # Load environment variables
 load_dotenv()
@@ -120,11 +122,15 @@ class LAUpathAgent:
         # Create agent with all tools
         self.agent = create_agent(
             self.llm,
-            tools=[search_vector_db, analyze_student_profile, recommend_major]
+            tools=[search_vector_db, analyze_student_profile, recommend_major, get_course_map]
         )
         
         # Initialize conversation history with system message
-        self.messages = [SystemMessage(content="""
+        self.messages = [self._get_system_message()]
+    
+    def _get_system_message(self) -> SystemMessage:
+        """Get the system message for the agent."""
+        return SystemMessage(content="""
 <identity>
 You are LAUpath AI, a specialized assistant designed to help undergraduate students navigate Lebanese American University (LAU). 
 You are knowledgeable, friendly, and supportive, helping students make informed decisions about their academic journey.
@@ -142,10 +148,13 @@ You have access to:
 - A comprehensive vector database of LAU documents (admissions, programs, fees, etc.)
 - A student profile analyzer tool that evaluates academic records and determines requirements
 - A major recommendation engine that provides personalized major suggestions
+- A course map retriever tool that provides curriculum PDFs for specific majors
 
 Always be helpful, accurate, and encouraging. When you don't have specific information, use the search_vector_db tool to find it.
 When students provide their academic information, use the analyze_student_profile tool to give them detailed feedback.
 When students need guidance on choosing a major, use the recommend_major tool to provide personalized recommendations.
+When students ask about a curriculum, course map, or course plan for a specific major, use the get_course_map tool to retrieve and display the appropriate PDF. 
+IMPORTANT: When the tool successfully returns a course map, respond with: "Here is the course map for [major name]. You can download the PDF if you want." The PDF will be displayed automatically below your message. Do NOT mention file paths or technical details like "COURSE_MAP_PATH" in your response. If a course map is not available, inform the student politely that it's not currently available without showing any technical paths or error details.
 </purpose>
 
 <guidelines>
@@ -156,7 +165,26 @@ When students need guidance on choosing a major, use the recommend_major tool to
 - Be clear about requirements and deadlines
 - If information is not available, admit it and suggest alternatives
 </guidelines>
-""")]
+""")
+    
+    def load_messages(self, messages: list) -> None:
+        """
+        Load conversation history for this chat session.
+        This ensures each chat has its own isolated context.
+        
+        Args:
+            messages (list): List of LangChain message objects (HumanMessage/AIMessage/ToolMessage)
+        """
+        # Start with system message, then add all loaded messages
+        self.messages = [self._get_system_message()]
+        # Filter out system messages from loaded messages and add the rest
+        for msg in messages:
+            if not isinstance(msg, SystemMessage):
+                self.messages.append(msg)
+    
+    def reset_messages(self) -> None:
+        """Reset conversation history to just the system message (for new chats)."""
+        self.messages = [self._get_system_message()]
     
     def send_message(self, message: str) -> list:
         """
@@ -231,13 +259,14 @@ def _chat_file_path(chat_id: str) -> Path:
 def load_chat_index() -> List[Dict[str, Any]]:
     """
     Load metadata for all saved chats.
+    Sorted by created_at timestamp (newest first).
 
     Returns:
-        List[Dict[str, Any]]: List of chat metadata dictionaries.
+        List[Dict[str, Any]]: List of chat metadata dictionaries, sorted by creation date (newest first).
     """
     chat_dir = ensure_chat_history_dir()
     chats: List[Dict[str, Any]] = []
-    for file in sorted(chat_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for file in chat_dir.glob("*.json"):
         try:
             with file.open("r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -251,6 +280,12 @@ def load_chat_index() -> List[Dict[str, Any]]:
             )
         except Exception:
             continue
+    
+    # Sort by created_at timestamp (newest first), fallback to updated_at if created_at is missing
+    chats.sort(
+        key=lambda x: x.get("created_at") or x.get("updated_at") or "",
+        reverse=True
+    )
     return chats
 
 
@@ -336,7 +371,7 @@ def save_current_chat() -> None:
     except Exception:
         return
 
-    # Update in-memory chat index
+    # Update in-memory chat index and sort by created_at (newest first)
     chats = st.session_state.get("chats_index", [])
     existing = next((c for c in chats if c.get("id") == chat_id), None)
     if existing:
@@ -351,6 +386,11 @@ def save_current_chat() -> None:
                 "updated_at": now,
             }
         )
+    # Sort chats by created_at (newest first) to ensure new chats appear at top
+    chats.sort(
+        key=lambda x: x.get("created_at") or x.get("updated_at") or "",
+        reverse=True
+    )
     st.session_state.chats_index = chats
     st.session_state.current_chat_created_at = data["created_at"]
 
@@ -364,6 +404,9 @@ def create_new_chat() -> None:
     st.session_state.current_chat_id = chat_id
     st.session_state.current_chat_created_at = now
     st.session_state.messages = []
+    # Reset agent's internal messages for the new chat
+    if "agent" in st.session_state:
+        st.session_state.agent.reset_messages()
     # Persist immediately so it shows up in index
     save_current_chat()
 
@@ -396,7 +439,6 @@ async def main():
         page_icon="🎓",
         layout="wide",
     )
-
     # Global UI styling to make layout closer to ChatGPT
     st.markdown(
         """
@@ -416,6 +458,18 @@ async def main():
             padding-top: 2px;
             padding-bottom: 2px;
         }
+
+       
+        section[data-testid="stSidebar"] button[kind="primary"] {
+            background-color: #374151 !important;  /* dark grey */
+            color: #ffffff !important;
+            border-color: #374151 !important;
+        }
+        section[data-testid="stSidebar"] button[kind="primary"]:hover {
+            background-color: #1F2937 !important;  /* even darker */
+            border-color: #1F2937 !important;
+        }
+
         </style>
         """,
         unsafe_allow_html=True,
@@ -447,24 +501,38 @@ async def main():
 
         if st.button("➕ New chat", use_container_width=True):
             create_new_chat()
+            # Reload chat index to ensure new chat is at top (sorted by created_at)
+            st.session_state.chats_index = load_chat_index()
             st.rerun()
 
         chats = st.session_state.get("chats_index", [])
         if chats:
-            chat_ids = [c["id"] for c in chats]
-            id_to_title = {c["id"]: c.get("title") or "New chat" for c in chats}
-            selected_id = st.radio(
-                "Conversations",
-                options=chat_ids,
-                format_func=lambda cid: id_to_title.get(cid, "Chat"),
-            )
-
-            if selected_id != st.session_state.get("current_chat_id"):
-                # Switch active chat
-                st.session_state.current_chat_id = selected_id
-                # Load messages for selected chat
-                st.session_state.messages = load_chat_messages(selected_id)
-                st.rerun()
+            st.markdown("**Conversations**")
+            current_chat_id = st.session_state.get("current_chat_id")
+            
+            # Display each chat as a button without borders
+            for chat in chats:
+                chat_id = chat["id"]
+                chat_title = chat.get("title") or "New chat"
+                is_selected = (chat_id == current_chat_id)
+                
+                # Create button with custom styling
+                button_key = f"chat_btn_{chat_id}"
+                if st.button(
+                    chat_title,
+                    key=button_key,
+                    use_container_width=True,
+                    type="primary" if is_selected else "secondary"
+                ):
+                    if chat_id != current_chat_id:
+                        st.session_state.current_chat_id = chat_id
+                        loaded_messages = load_chat_messages(chat_id)
+                        st.session_state.messages = loaded_messages
+                        # Sync agent's internal messages with this chat's history
+                        if "agent" in st.session_state:
+                            st.session_state.agent.load_messages(loaded_messages)
+                        st.rerun()
+            
         else:
             st.info("No chats yet. Start a new conversation!")
 
@@ -492,9 +560,16 @@ async def main():
     if "messages" not in st.session_state or not isinstance(st.session_state.messages, list):
         current_id = st.session_state.get("current_chat_id")
         if current_id:
-            st.session_state.messages = load_chat_messages(current_id)
+            loaded_messages = load_chat_messages(current_id)
+            st.session_state.messages = loaded_messages
+            # Sync agent's internal messages with loaded chat history
+            if "agent" in st.session_state:
+                st.session_state.agent.load_messages(loaded_messages)
         else:
             st.session_state.messages = []
+            # Reset agent's messages for new empty chat
+            if "agent" in st.session_state:
+                st.session_state.agent.reset_messages()
     # Handle quick actions (use saved profile data, independent of UI location)
     profile_for_tools = load_student_profile()
     if "quick_action" in st.session_state:
@@ -543,35 +618,99 @@ Please use the analyze_student_profile tool with these exact values."""
         # Handle tool execution result message
         elif isinstance(message, ToolMessage):
             with st.chat_message("assistant"):
-                with st.status("📊 Tool result", expanded=False):
-                    # Truncate very long results for display
-                    content = message.content
-                    if len(content) > 1000:
-                        st.markdown(content[:1000] + "\n\n... (truncated, full result used by agent)")
+                content = message.content
+                # Check if this is a course map path
+                if content.startswith("COURSE_MAP_PATH:"):
+                    # Parse the content: COURSE_MAP_PATH:path|major_name
+                    parts = content.replace("COURSE_MAP_PATH:", "").strip().split("|")
+                    pdf_path = parts[0].strip()
+                    major_display = parts[1].strip() if len(parts) > 1 else "the requested major"
+                    
+                    pdf_file = Path(pdf_path)
+                    if pdf_file.exists():
+                        # Read PDF file
+                        with open(pdf_file, "rb") as pdf_file_obj:
+                            pdf_bytes = pdf_file_obj.read()
+                        
+                        # Display PDF in an embedded viewer using iframe
+                        import base64
+                        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+                        pdf_display = f'''
+                        <iframe src="data:application/pdf;base64,{pdf_base64}" 
+                                width="100%" 
+                                height="600px" 
+                                style="border: 1px solid #ddd; border-radius: 5px;">
+                        </iframe>
+                        '''
+                        st.markdown(pdf_display, unsafe_allow_html=True)
+                        
+                        # Also provide download button
+                        st.download_button(
+                            label="📥 Download Course Map PDF",
+                            data=pdf_bytes,
+                            file_name=pdf_file.name,
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
                     else:
-                        st.markdown(content)
+                        # If file doesn't exist, show user-friendly message
+                        st.info("The course map for this major is not currently available.")
+                else:
+                    with st.status("📊 Tool result", expanded=False):
+                        # Truncate very long results for display
+                        if len(content) > 1000:
+                            st.markdown(content[:1000] + "\n\n... (truncated, full result used by agent)")
+                        else:
+                            st.markdown(content)
         
         # Handle user message
         elif isinstance(message, HumanMessage):
             with st.chat_message("user"):
                 st.markdown(message.content)
 
-    # Profile & tools button and panel placed near the input area
-    bottom_left, bottom_right = st.columns([4, 1])
-    with bottom_right:
-        if st.button("👤 Profile & tools", key="toggle_profile_bottom", use_container_width=True):
-            st.session_state.show_profile_panel = not st.session_state.show_profile_panel
+    # Initialize modals for academic profile and career test
+    modal = Modal(
+        "📋 Academic Profile",
+        key="academic-profile-modal",
+        padding=30,
+        max_width=600
+    )
+    
+    career_test_modal = Modal(
+        "🎯 Career Interest Test",
+        key="career-test-modal",
+        padding=30,
+        max_width=700
+    )
 
+    # Add custom CSS for professional modal styling
+
+    # Profile button placed near the input area
+    bottom_left, bottom_middle, bottom_right = st.columns([3, 1, 1])
+    with bottom_right:
+        open_modal = st.button("👤 Academic Profile", key="toggle_profile_bottom", use_container_width=True)
+    with bottom_middle:
+        open_career_test = st.button("🎯 Career Test", key="toggle_career_test", use_container_width=True)
+    
+    # Open modals if buttons were clicked
+    if open_modal:
+        modal.open()
+    if open_career_test:
+        career_test_modal.open()
+    
     profile = load_student_profile()
-    if st.session_state.show_profile_panel:
-        with st.expander("📋 Student profile & tools", expanded=True):
+    
+    # Display modal content
+    if modal.is_open():
+        with modal.container():
             with st.form("student_profile_form"):
-                st.markdown("Provide or update your academic details for personalized guidance.")
+                #st.markdown("### Provide or update your academic details for personalized guidance.")
+                
                 school_gpa = st.number_input(
                     "High School GPA",
                     min_value=0.0,
                     max_value=20.0,
-                    value=profile.get("school_gpa", 0.0) if profile else 0.0,
+                    value=(profile.get("school_gpa") or 0.0) if profile else 0.0,
                     step=0.1,
                     help="Enter your high school GPA (Lebanese system: 0-20, US system: 0-4.0)",
                 )
@@ -580,7 +719,7 @@ Please use the analyze_student_profile tool with these exact values."""
                     "Lebanese Baccalaureate Score (Optional)",
                     min_value=0.0,
                     max_value=20.0,
-                    value=profile.get("lebanese_exam_score", 0.0) if profile else 0.0,
+                    value=(profile.get("lebanese_exam_score") or 0.0) if profile else 0.0,
                     step=0.1,
                 )
 
@@ -588,7 +727,7 @@ Please use the analyze_student_profile tool with these exact values."""
                     "SAT Score (Optional)",
                     min_value=0,
                     max_value=1600,
-                    value=profile.get("sat_score", 0) if profile else 0,
+                    value=(profile.get("sat_score") or 0) if profile else 0,
                     step=10,
                 )
 
@@ -610,12 +749,16 @@ Please use the analyze_student_profile tool with these exact values."""
                     "English Proficiency Score",
                     min_value=0.0,
                     max_value=200.0,
-                    value=profile.get("english_proficiency_score", 0.0) if profile else 0.0,
+                    value=(profile.get("english_proficiency_score") or 0.0) if profile else 0.0,
                     step=0.1,
                     help="Enter your English proficiency test score",
                 )
 
-                submitted = st.form_submit_button("💾 Save Profile")
+                col1, col2 = st.columns(2)
+                with col1:
+                    submitted = st.form_submit_button("💾 Save Profile", use_container_width=True)
+                with col2:
+                    analyze_btn = st.form_submit_button("🔍 Check Eligibility", use_container_width=True)
 
                 if submitted:
                     profile = {
@@ -626,35 +769,354 @@ Please use the analyze_student_profile tool with these exact values."""
                         "english_proficiency_score": english_score if english_score > 0 else None,
                     }
                     save_student_profile(profile)
-                    st.success("Profile saved! You can now ask me to analyze it.")
-
-            profile = load_student_profile()
-            if profile:
-                st.markdown("✅ **Profile loaded**")
-                with st.expander("View Saved Profile", expanded=False):
-                    for key, value in profile.items():
-                        if value is not None:
-                            st.text(f"{key.replace('_', ' ').title()}: {value}")
-
-            st.markdown("---")
-            tools_col1, tools_col2 = st.columns(2)
-            with tools_col1:
-                if st.button("🔍 Analyze My Profile", use_container_width=True):
-                    if profile:
+                    #st.success("✅ Profile saved! You can now ask me to analyze it.")
+                    modal.close()
+                    st.rerun()
+                
+                if analyze_btn:
+                    # Save profile first if there are values
+                    profile_data = {
+                        "school_gpa": school_gpa if school_gpa > 0 else None,
+                        "lebanese_exam_score": lebanese_exam if lebanese_exam > 0 else None,
+                        "sat_score": sat_score if sat_score > 0 else None,
+                        "english_proficiency_type": english_test_type if english_test_type != "None" else None,
+                        "english_proficiency_score": english_score if english_score > 0 else None,
+                    }
+                    # Check if at least one field has a value
+                    if any(v is not None for v in profile_data.values()):
+                        save_student_profile(profile_data)
                         st.session_state.quick_action = "analyze_profile"
+                        modal.close()
+                        st.rerun()
                     else:
                         st.warning("Please enter your academic information first.")
-            with tools_col2:
-                if st.button("🎯 Get Major Recommendations", use_container_width=True):
-                    st.session_state.quick_action = "recommend_major"
 
-            st.markdown(
-                """
-**Tips**
-- Use your saved profile for eligibility analysis  
-- Ask follow-up questions about the analysis or recommendations  
-"""
-            )
+#             st.markdown(
+#                 """
+# **Tips**
+# - Use your saved profile for eligibility analysis  
+# - Ask follow-up questions about the analysis or recommendations  
+# """
+#             )
+
+    # Career Test Modal
+    if career_test_modal.is_open():
+        with career_test_modal.container():
+            # Initialize career test state
+            if "career_test_answers" not in st.session_state:
+                st.session_state.career_test_answers = {}
+            if "career_test_current_question" not in st.session_state:
+                st.session_state.career_test_current_question = 0
+            
+            # Career test questions specifically designed for LAU majors
+            career_questions = [
+                # Engineering-focused questions
+                {
+                    "question": "How interested are you in programming and software development?",
+                    "target_majors": ["Computer Engineering (COE)", "Computer and Information Engineering (CIE)"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How much do you enjoy working with computer hardware and circuits?",
+                    "target_majors": ["Computer Engineering (COE)", "Electrical Engineering (ELE)"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How interested are you in networks, cybersecurity, and information systems?",
+                    "target_majors": ["Computer and Information Engineering (CIE)"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How much do you like working with electrical systems and power?",
+                    "target_majors": ["Electrical Engineering (ELE)"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How interested are you in optimizing processes and improving efficiency?",
+                    "target_majors": ["Industrial Engineering (INE)"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How much do you enjoy designing and building mechanical systems?",
+                    "target_majors": ["Mechanical Engineering (MCE)"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How interested are you in oil, gas, and energy industries?",
+                    "target_majors": ["Petroleum Engineering (PTE)"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                # Business and Management
+                {
+                    "question": "How much do you enjoy business strategy and management?",
+                    "target_majors": ["Business Administration"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How interested are you in entrepreneurship and starting businesses?",
+                    "target_majors": ["Business Administration"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                # Health Sciences
+                {
+                    "question": "How much do you want to become a doctor and treat patients?",
+                    "target_majors": ["Medicine"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How interested are you in providing direct patient care as a nurse?",
+                    "target_majors": ["Nursing"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                # Social Sciences
+                {
+                    "question": "How much do you enjoy studying human behavior and mental health?",
+                    "target_majors": ["Psychology"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                # Arts and Design
+                {
+                    "question": "How interested are you in designing buildings and spaces?",
+                    "target_majors": ["Architecture"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How much do you enjoy creating visual designs and graphics?",
+                    "target_majors": ["Graphic Design"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                # Communication
+                {
+                    "question": "How interested are you in journalism and news reporting?",
+                    "target_majors": ["Journalism"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                # Education
+                {
+                    "question": "How much do you enjoy teaching and working with students?",
+                    "target_majors": ["Education"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                # General interest questions
+                {
+                    "question": "How much do you enjoy solving complex mathematical problems?",
+                    "target_majors": ["Computer Engineering (COE)", "Computer and Information Engineering (CIE)", "Electrical Engineering (ELE)", "Industrial Engineering (INE)", "Mechanical Engineering (MCE)", "Petroleum Engineering (PTE)"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How interested are you in working in a laboratory or research setting?",
+                    "target_majors": ["Computer Engineering (COE)", "Computer and Information Engineering (CIE)", "Electrical Engineering (ELE)", "Mechanical Engineering (MCE)", "Medicine", "Psychology"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                },
+                {
+                    "question": "How much do you prefer working with people versus working with things?",
+                    "target_majors": ["Business Administration", "Medicine", "Nursing", "Psychology", "Education", "Journalism"],
+                    "emoji_options": ["😊", "😐", "😕", "😞"]
+                }
+            ]
+            
+            total_questions = len(career_questions)
+            current_q = st.session_state.career_test_current_question
+            question_data = career_questions[current_q]
+            
+            # Progress indicator
+            progress = (current_q + 1) / total_questions
+            st.progress(progress)
+            st.caption(f"Question {current_q + 1} of {total_questions}")
+            
+            # Display question
+            st.markdown(f"### {question_data['question']}")
+            st.markdown("---")
+            
+            # Emoji options with labels
+            emoji_labels = {
+                "😊": "Strongly Like",
+                "😐": "Somewhat Like",
+                "😕": "Somewhat Dislike",
+                "😞": "Strongly Dislike"
+            }
+            
+            # Create columns for emoji buttons (equal width)
+            col1, col2, col3, col4 = st.columns(4)
+            selected_emoji = None
+            
+            # Format button text: emoji on first line (centered with padding), text on second line
+            # Using newlines and spacing to center emoji visually
+            button_texts = [
+                f"\n{question_data['emoji_options'][0]}\n\n{emoji_labels['😊']}",
+                f"\n{question_data['emoji_options'][1]}\n\n{emoji_labels['😐']}",
+                f"\n{question_data['emoji_options'][2]}\n\n{emoji_labels['😕']}",
+                f"\n{question_data['emoji_options'][3]}\n\n{emoji_labels['😞']}"
+            ]
+            
+            with col1:
+                if st.button(button_texts[0], 
+                            key=f"emoji_0_q{current_q}", 
+                            use_container_width=True):
+                    selected_emoji = question_data['emoji_options'][0]
+            with col2:
+                if st.button(button_texts[1], 
+                            key=f"emoji_1_q{current_q}", 
+                            use_container_width=True):
+                    selected_emoji = question_data['emoji_options'][1]
+            with col3:
+                if st.button(button_texts[2], 
+                            key=f"emoji_2_q{current_q}", 
+                            use_container_width=True):
+                    selected_emoji = question_data['emoji_options'][2]
+            with col4:
+                if st.button(button_texts[3], 
+                            key=f"emoji_3_q{current_q}", 
+                            use_container_width=True):
+                    selected_emoji = question_data['emoji_options'][3]
+            
+            # Save answer if emoji was clicked
+            if selected_emoji:
+                st.session_state.career_test_answers[current_q] = {
+                    "answer": selected_emoji,
+                    "target_majors": question_data.get('target_majors', []),
+                    "score": {"😊": 4, "😐": 2, "😕": 1, "😞": 0}[selected_emoji]
+                }
+                if current_q < total_questions - 1:
+                    st.session_state.career_test_current_question += 1
+                    st.rerun()
+            
+            # Navigation buttons
+            nav_col1, nav_col2, nav_col3 = st.columns([1, 1, 1])
+            with nav_col1:
+                if current_q > 0:
+                    if st.button("← Previous", key="prev_question", use_container_width=True):
+                        st.session_state.career_test_current_question -= 1
+                        st.rerun()
+            
+            with nav_col2:
+                # Show current answer if exists
+                if current_q in st.session_state.career_test_answers:
+                    answer = st.session_state.career_test_answers[current_q]["answer"]
+                    st.info(f"Selected: {answer} {emoji_labels[answer]}")
+            
+            with nav_col3:
+                if current_q < total_questions - 1:
+                    if st.button("Next →", key="next_question", use_container_width=True):
+                        if current_q not in st.session_state.career_test_answers:
+                            st.warning("Please select an answer before proceeding.")
+                        else:
+                            st.session_state.career_test_current_question += 1
+                            st.rerun()
+                else:
+                    # Submit button on last question
+                    if st.button("Submit Test", key="submit_test", use_container_width=True, type="primary"):
+                        if current_q not in st.session_state.career_test_answers:
+                            st.warning("Please select an answer before submitting.")
+                        else:
+                            # Calculate major scores directly from test answers
+                            major_scores = {}
+                            
+                            # Score each major based on answers
+                            for q_idx, answer_data in st.session_state.career_test_answers.items():
+                                target_majors = answer_data.get("target_majors", [])
+                                score = answer_data["score"]
+                                
+                                # Distribute score to all target majors for this question
+                                for major in target_majors:
+                                    if major not in major_scores:
+                                        major_scores[major] = 0
+                                    major_scores[major] += score
+                            
+                            # Get top 3 majors
+                            sorted_majors = sorted(major_scores.items(), key=lambda x: x[1], reverse=True)
+                            top_majors = [major for major, score in sorted_majors[:3] if score > 0]
+                            
+                            # If we have top majors, use them; otherwise generate from interests
+                            if top_majors:
+                                # Build interests and strengths from top majors
+                                interests_list = []
+                                strengths_list = []
+                                
+                                # Map majors to interests and strengths (comprehensive list)
+                                major_to_interests = {
+                                    "Computer Engineering (COE)": "programming, hardware, embedded systems, computer architecture",
+                                    "Computer and Information Engineering (CIE)": "networks, cybersecurity, information systems, software",
+                                    "Computer Science": "programming, algorithms, software, computing, technology",
+                                    "Electrical Engineering (ELE)": "electronics, power systems, circuits, electrical systems",
+                                    "Industrial Engineering (INE)": "optimization, process improvement, operations, efficiency",
+                                    "Mechanical Engineering (MCE)": "mechanical design, manufacturing, thermodynamics, machines",
+                                    "Mechatronics Engineering": "robotics, automation, mechanical systems, electronics, control",
+                                    "Civil Engineering": "construction, infrastructure, design, building, structures",
+                                    "Chemical Engineering": "chemistry, processes, manufacturing, materials, reactions",
+                                    "Petroleum Engineering (PTE)": "oil, gas, energy, drilling, reservoir engineering",
+                                    "Business Administration": "business, management, finance, entrepreneurship, strategy",
+                                    "Business": "business, management, finance, marketing, entrepreneurship",
+                                    "Business Emphasis Hospitality & Tourism Management": "hospitality, tourism, hotel management, customer service, travel",
+                                    "Economics": "economics, finance, markets, policy, analysis",
+                                    "Medicine": "health, biology, helping people, medical diagnosis, patient care",
+                                    "Nursing": "healthcare, patient care, helping, wellness, biology",
+                                    "Pharmacy": "pharmacy, medicine, drugs, health, patient care",
+                                    "Nutrition and Dietetics": "nutrition, health, food science, wellness, diet planning",
+                                    "Biology": "biology, life sciences, research, nature, experiments",
+                                    "Bioinformatics": "biology, computing, data analysis, genetics, programming, research",
+                                    "Chemistry": "chemistry, experiments, molecules, reactions, research",
+                                    "Applied Physics": "physics, research, experiments, mathematics, scientific analysis",
+                                    "Mathematics": "mathematics, problem-solving, logic, analysis, theoretical concepts",
+                                    "Psychology": "human behavior, mental health, counseling, research, therapy",
+                                    "Political Science/International Affairs": "politics, international relations, government, policy, diplomacy",
+                                    "Architecture": "design, building, creativity, space, urban planning",
+                                    "Graphic Design": "art, design, creativity, visual, media, branding",
+                                    "Interior Design": "interior design, space, decoration, architecture, creativity",
+                                    "Fashion Design": "fashion, design, clothing, creativity, style, textiles",
+                                    "Studio Art": "art, painting, sculpture, visual arts, creativity, exhibition",
+                                    "Journalism": "writing, media, news, communication, storytelling, investigation",
+                                    "Multimedia Journalism": "journalism, multimedia, video, digital media, storytelling, news",
+                                    "TV & Film": "television, film, video production, cinematography, directing, media",
+                                    "Communication": "communication, media, public relations, advertising, marketing",
+                                    "Performing Arts": "theater, acting, dance, music, performance, entertainment",
+                                    "Education": "teaching, education, helping, children, learning, curriculum",
+                                    "English": "literature, writing, language, reading, analysis",
+                                    "Translation": "languages, translation, linguistics, communication, cultural exchange"
+                                }
+                                
+                                for major in top_majors:
+                                    if major in major_to_interests:
+                                        interests_list.append(major_to_interests[major])
+                                        # Extract major name for strengths
+                                        major_name = major.split("(")[0].strip() if "(" in major else major
+                                        strengths_list.append(major_name.lower())
+                                
+                                interests = ", ".join(interests_list) if interests_list else "general academic interests"
+                                academic_strengths = ", ".join(strengths_list) if strengths_list else "general academic strengths"
+                                career_goals = f"Career in {', '.join([m.split('(')[0].strip() if '(' in m else m for m in top_majors])}"
+                                preferred_work_environment = "office, lab, field, studio, hospital, clinic"  # Comprehensive
+                            else:
+                                # Fallback if no clear matches
+                                interests = "general academic and professional interests"
+                                academic_strengths = "general academic strengths"
+                                career_goals = "exploring career options"
+                                preferred_work_environment = "various work environments"
+                            
+                            # Get student profile if available
+                            profile = load_student_profile()
+                            profile_json = json.dumps(profile) if profile else None
+                            
+                            # Trigger the recommend_major tool via agent
+                            test_results_prompt = f"""Based on my career interest test results, please recommend specific LAU majors for me. 
+My test results show interest in: {', '.join(top_majors) if top_majors else 'various fields'}.
+My interests: {interests}
+My academic strengths: {academic_strengths}
+My career goals: {career_goals}
+Preferred work environment: {preferred_work_environment}
+
+Please use the recommend_major tool with these details to suggest the top 3 specific majors available at LAU (like Computer Engineering, Electrical Engineering, etc.) that best fit my interests. Do not suggest general categories - only specific LAU majors."""
+                            
+                            st.session_state.messages.append(HumanMessage(content=test_results_prompt))
+                            messages = st.session_state.agent.send_message(test_results_prompt)
+                            st.session_state.messages.extend(messages)
+                            save_current_chat()
+                            
+                            # Reset test state
+                            st.session_state.career_test_answers = {}
+                            st.session_state.career_test_current_question = 0
+                            career_test_modal.close()
+                            st.rerun()
 
     # Get user input from chat interface
     prompt = st.chat_input("Ask me anything about LAU, your profile, or major selection...")
@@ -687,12 +1149,49 @@ Please use the analyze_student_profile tool with these exact values."""
                         st.code(tool_args, language="json")
             elif isinstance(message, ToolMessage):
                 with st.chat_message("assistant"):
-                    with st.status("📊 Tool result", expanded=False):
-                        content = message.content
-                        if len(content) > 1000:
-                            st.markdown(content[:1000] + "\n\n... (truncated)")
+                    content = message.content
+                    # Check if this is a course map path
+                    if content.startswith("COURSE_MAP_PATH:"):
+                        # Parse the content: COURSE_MAP_PATH:path|major_name
+                        parts = content.replace("COURSE_MAP_PATH:", "").strip().split("|")
+                        pdf_path = parts[0].strip()
+                        major_display = parts[1].strip() if len(parts) > 1 else "the requested major"
+                        
+                        pdf_file = Path(pdf_path)
+                        if pdf_file.exists():
+                            # Read PDF file
+                            with open(pdf_file, "rb") as pdf_file_obj:
+                                pdf_bytes = pdf_file_obj.read()
+                            
+                            # Display PDF in an embedded viewer using iframe
+                            import base64
+                            pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+                            pdf_display = f'''
+                            <iframe src="data:application/pdf;base64,{pdf_base64}" 
+                                    width="100%" 
+                                    height="600px" 
+                                    style="border: 1px solid #ddd; border-radius: 5px;">
+                            </iframe>
+                            '''
+                            st.markdown(pdf_display, unsafe_allow_html=True)
+                            
+                            # Also provide download button
+                            st.download_button(
+                                label="📥 Download Course Map PDF",
+                                data=pdf_bytes,
+                                file_name=pdf_file.name,
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
                         else:
-                            st.markdown(content)
+                            # If file doesn't exist, show user-friendly message
+                            st.info("The course map for this major is not currently available.")
+                    else:
+                        with st.status("📊 Tool result", expanded=False):
+                            if len(content) > 1000:
+                                st.markdown(content[:1000] + "\n\n... (truncated)")
+                            else:
+                                st.markdown(content)
         # Persist updated chat history
         save_current_chat()
 
