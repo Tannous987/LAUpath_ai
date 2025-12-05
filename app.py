@@ -474,7 +474,7 @@ async def main():
         page_icon="🎓",
         layout="wide",
     )
-    # Global UI styling to make layout closer to ChatGPT
+    # Global UI styling
     st.markdown(
         """
         <style>
