@@ -91,7 +91,7 @@ LAUpath_ai/
 ## 🔄 How Everything Works Together
 
 1. **Setup Phase** (`setup_rag.py`):
-   - Loads PDFs from `data/pdfs/`
+   - Loads PDFs from `data/lau_documents/`
    - Splits into chunks
    - Creates embeddings
    - Stores in ChromaDB vector database

@@ -54,7 +54,7 @@ streamlit run app.py
 - Check that `vector_db/` directory was created
 
 ### "No PDF files found"
-- Ensure PDF files are in `data/pdfs/` directory
+- Ensure PDF files are in `data/lau_documents/` directory
 - Check file names end with `.pdf`
 
 ### Import errors

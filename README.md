@@ -53,7 +53,7 @@ LAUpath_ai/
 ├── .env.example          # Environment variables template
 ├── README.md             # This file
 ├── data/
-│   └── pdfs/             # LAU documents (PDFs)
+│   └── lau_documents/    # LAU documents (PDFs)
 │       ├── English Proficiency Scores.pdf
 │       ├── Financial Aid.pdf
 │       ├── Minors.pdf
@@ -110,7 +110,7 @@ python setup_rag.py
 ```
 
 This will:
-- Load all PDF files from `data/pdfs/`
+- Load all PDF files from `data/lau_documents/`
 - Split them into chunks
 - Create embeddings
 - Store them in `vector_db/` directory
@@ -132,7 +132,7 @@ The vector database is stored in `./vector_db/` by default. To change this:
 2. Edit `app.py`: Change `VECTOR_DB_DIRECTORY` variable (line 30)
 
 ### PDF Documents Path
-PDF documents are loaded from `./data/pdfs/` by default. To change this:
+PDF documents are loaded from `./data/lau_documents/` by default. To change this:
 1. Edit `setup_rag.py`: Change `PDF_DIRECTORY` variable (line 14)
 2. Ensure all LAU-related PDFs are in the specified directory
 
