@@ -395,6 +395,41 @@ def save_current_chat() -> None:
     st.session_state.current_chat_created_at = data["created_at"]
 
 
+def delete_chat(chat_id: str) -> None:
+    """
+    Delete a chat by removing its file and updating the chat index.
+    
+    Args:
+        chat_id (str): The ID of the chat to delete
+    """
+    # Delete the chat file
+    chat_file = _chat_file_path(chat_id)
+    if chat_file.exists():
+        try:
+            chat_file.unlink()
+        except Exception:
+            pass  # File might already be deleted
+    
+    # Remove from session state index
+    chats = st.session_state.get("chats_index", [])
+    st.session_state.chats_index = [c for c in chats if c.get("id") != chat_id]
+    
+    # If this was the current chat, switch to another chat or create a new one
+    if st.session_state.get("current_chat_id") == chat_id:
+        remaining_chats = st.session_state.chats_index
+        if remaining_chats:
+            # Switch to the most recent chat
+            new_chat_id = remaining_chats[0]["id"]
+            st.session_state.current_chat_id = new_chat_id
+            loaded_messages = load_chat_messages(new_chat_id)
+            st.session_state.messages = loaded_messages
+            if "agent" in st.session_state:
+                st.session_state.agent.load_messages(loaded_messages)
+        else:
+            # No chats left, create a new one
+            create_new_chat()
+
+
 def create_new_chat() -> None:
     """
     Create a new empty chat session and set it as current.
@@ -510,27 +545,65 @@ async def main():
             st.markdown("**Conversations**")
             current_chat_id = st.session_state.get("current_chat_id")
             
-            # Display each chat as a button without borders
+            # Initialize pending deletion state
+            if "pending_deletion" not in st.session_state:
+                st.session_state.pending_deletion = None
+            
+            # Show confirmation dialog if a deletion is pending
+            if st.session_state.pending_deletion:
+                pending_chat_id = st.session_state.pending_deletion
+                pending_chat = next((c for c in chats if c.get("id") == pending_chat_id), None)
+                pending_title = pending_chat.get("title") if pending_chat else "this chat"
+                
+                st.warning(f"⚠️ Delete '{pending_title}'?")
+                confirm_col1, confirm_col2 = st.columns(2)
+                with confirm_col1:
+                    if st.button("✅confirm", key="confirm_delete", use_container_width=True):
+                        delete_chat(pending_chat_id)
+                        st.session_state.pending_deletion = None
+                        st.rerun()
+                with confirm_col2:
+                    if st.button("❌cancel", key="cancel_delete", use_container_width=True):
+                        st.session_state.pending_deletion = None
+                        st.rerun()
+                st.markdown("---")
+            
+            # Display each chat with a delete button
             for chat in chats:
                 chat_id = chat["id"]
                 chat_title = chat.get("title") or "New chat"
                 is_selected = (chat_id == current_chat_id)
                 
-                # Create button with custom styling
-                button_key = f"chat_btn_{chat_id}"
-                if st.button(
-                    chat_title,
-                    key=button_key,
-                    use_container_width=True,
-                    type="primary" if is_selected else "secondary"
-                ):
-                    if chat_id != current_chat_id:
-                        st.session_state.current_chat_id = chat_id
-                        loaded_messages = load_chat_messages(chat_id)
-                        st.session_state.messages = loaded_messages
-                        # Sync agent's internal messages with this chat's history
-                        if "agent" in st.session_state:
-                            st.session_state.agent.load_messages(loaded_messages)
+                # Skip showing delete button if this chat is pending deletion (already shown in confirmation)
+                if st.session_state.pending_deletion == chat_id:
+                    continue
+                
+                # Create a row with chat button and delete button
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    # Chat button
+                    button_key = f"chat_btn_{chat_id}"
+                    if st.button(
+                        chat_title,
+                        key=button_key,
+                        use_container_width=True,
+                        type="primary" if is_selected else "secondary"
+                    ):
+                        if chat_id != current_chat_id:
+                            st.session_state.current_chat_id = chat_id
+                            loaded_messages = load_chat_messages(chat_id)
+                            st.session_state.messages = loaded_messages
+                            # Sync agent's internal messages with this chat's history
+                            if "agent" in st.session_state:
+                                st.session_state.agent.load_messages(loaded_messages)
+                            st.rerun()
+                
+                with col2:
+                    # Delete button
+                    delete_key = f"delete_btn_{chat_id}"
+                    if st.button("🗑️", key=delete_key, help="Delete this chat"):
+                        st.session_state.pending_deletion = chat_id
                         st.rerun()
             
         else:

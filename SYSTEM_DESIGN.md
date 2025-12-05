@@ -84,7 +84,7 @@ Response to User
 ### 2. RAG System Flow
 
 ```
-PDF Documents (data/pdfs/)
+PDF Documents (data/lau_documents/)
     │
     ▼
 setup_rag.py
@@ -178,7 +178,7 @@ User receives recommendations
 ### Input Data
 1. **User Messages**: Text input through Streamlit chat
 2. **Student Profile**: Form data from sidebar
-3. **PDF Documents**: Static files in `data/pdfs/`
+3. **PDF Documents**: Static files in `data/lau_documents/`
 
 ### Processing
 1. **Message Processing**: LangChain agent processes user input

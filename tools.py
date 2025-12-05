@@ -272,13 +272,6 @@ def recommend_major(
                 "environment": ["office", "lab", "tech company"],
                 "riasec": ["Investigative", "Realistic"]
             },
-            "Computer and Information Engineering (CIE)": {
-                "interests": ["networks", "information systems", "data communication", "cybersecurity", "software", "programming"],
-                "strengths": ["math", "logic", "problem-solving", "analytical thinking", "networking"],
-                "careers": ["network engineer", "information systems engineer", "cybersecurity specialist", "software engineer"],
-                "environment": ["office", "remote", "tech company"],
-                "riasec": ["Investigative", "Conventional"]
-            },
             "Electrical Engineering (ELE)": {
                 "interests": ["electronics", "power systems", "circuits", "signal processing", "electromagnetics", "renewable energy"],
                 "strengths": ["math", "physics", "analytical thinking", "problem-solving", "circuit analysis"],
@@ -668,7 +661,7 @@ def get_course_map(major_name: str) -> str:
     
     Args:
         major_name (str): The name of the major (e.g., "Computer Engineering", "COE", 
-                         "Computer and Information Engineering", "CIE", "Electrical Engineering", etc.)
+                         "Civil Engineering", "CIE", "Electrical Engineering", etc.)
     
     Returns:
         str: The file path to the course map PDF, or an error message if not found.
@@ -693,11 +686,11 @@ def get_course_map(major_name: str) -> str:
             "comp eng": "COE",
             "computer eng": "COE",
             
-            # Computer and Information Engineering variations
-            "computer and information engineering": "CIE",
+            # Civil Engineering variations
+            "civil engineering": "CIE",
             "cie": "CIE",
-            "computer information engineering": "CIE",
-            "comp info eng": "CIE",
+            "civil eng": "CIE",
+            "civ eng": "CIE",
             
             # Electrical Engineering variations
             "electrical engineering": "ELE",

@@ -1,7 +1,7 @@
 """
 RAG Setup Script for LAUpath AI
 
-This script processes PDF documents from the data/pdfs directory and creates
+This script processes PDF documents from the data/lau_documents directory and creates
 a vector database using Chroma for retrieval-augmented generation.
 
 Run this script once before using the main application to set up the vector database.
@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-PDF_DIRECTORY = "./data/pdfs"
+PDF_DIRECTORY = "./data/lau_documents"
 VECTOR_DB_DIRECTORY = "./vector_db"
 COLLECTION_NAME = "lau_documents"
 EMBEDDING_MODEL = "models/gemini-embedding-exp-03-07"
@@ -32,7 +32,7 @@ def setup_rag() -> None:
     Set up the RAG system by processing PDFs and creating a vector database.
     
     This function:
-    1. Loads all PDF files from the data/pdfs directory
+    1. Loads all PDF files from the data/lau_documents directory
     2. Splits documents into chunks
     3. Creates embeddings and stores them in Chroma vector database
     """
