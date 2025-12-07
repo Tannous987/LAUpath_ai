@@ -89,8 +89,6 @@ The application requires a Google Gemini API key to function. This key must be s
 
 3. **Verify File Location**: Ensure the `.env` file is in the project root directory (same level as `app.py` and `requirements.txt`).
 
-**Security Note**: The `.env` file is automatically excluded from version control via `.gitignore` to prevent accidental exposure of API keys. Never commit API keys to version control systems.
-
 #### Step 5: Initialize the RAG System
 
 The Retrieval Augmented Generation system requires a vector database to be created from the PDF documents. This is a one-time setup process that must be completed before running the application.
