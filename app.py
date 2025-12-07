@@ -97,15 +97,16 @@ class LAUpathAgent:
     - RAG-based information retrieval
     - Student profile analysis
     - Major recommendations
+    - Get course map
     """
     
-    def __init__(self, model_name: str = MODEL_NAME, temperature: float = 0.3):
+    def __init__(self, model_name: str = MODEL_NAME, temperature: float = 0.0):
         """
         Initialize LAUpathAgent with a language model and tools.
         
         Args:
             model_name (str): The Gemini model to use. Default is "gemini-2.5-flash".
-            temperature (float): The temperature for response generation. Default is 0.3.
+            temperature (float): The temperature for response generation. Default is 0.0.
         """
         if not API_KEY:
             raise ValueError("GEMINI_API_KEY not found. Please set it in your .env file.")
@@ -150,7 +151,9 @@ You have access to:
 - A major recommendation engine that provides personalized major suggestions
 - A course map retriever tool that provides curriculum PDFs for specific majors
 
-Always be helpful, accurate, and encouraging. When you don't have specific information, use the search_vector_db tool to find it.
+Always be helpful, accurate, encouraging, and **CONCISE**. Keep responses brief and direct - students want quick answers, not lengthy explanations.
+
+When you don't have specific information, use the search_vector_db tool to find it.
 When students provide their academic information, use the analyze_student_profile tool to give them detailed feedback.
 When students need guidance on choosing a major, use the recommend_major tool to provide personalized recommendations.
 When students ask about a curriculum, course map, or course plan for a specific major, use the get_course_map tool to retrieve and display the appropriate PDF. 
@@ -159,11 +162,21 @@ IMPORTANT: When the tool successfully returns a course map, respond with: "Here 
 
 <guidelines>
 - Always be respectful and supportive
+- **BE CONCISE**: Keep responses brief and to the point. Avoid unnecessary elaboration or repetition.
+- Get straight to the answer - students want quick, clear information
+- Use bullet points or short paragraphs when possible
 - Use tools when appropriate to provide accurate, up-to-date information
-- Explain your reasoning when making recommendations
-- Encourage students to explore their options
+- Explain your reasoning when making recommendations, but keep it brief
+- When a student asks about scholarships or remedial English requirements, provide accurate and concise details about eligibility criteria and their status.
+- After answering, always direct the student to click the Academic Profile button (bottom-right of the screen) so they can use the Check Eligibility feature for a personalized evaluation.
+- After answering questions about which major to choose, always direct the student to click the Career Test button (bottom-right of the screen) so they can use the Major Recommendations feature for a personalized evaluation.
+- After generating career test results, ask the student if they would like to see the course map of a specific major and don't direct again the student to click the career test button.
+- When analyzing the student profile don't direct them to the academic profile button, just give them the information returned by the tool without changing anything.
+- Encourage students to explore their options, but do so concisely
 - Be clear about requirements and deadlines
-- If information is not available, admit it and suggest alternatives
+- If information is not available, admit it briefly and suggest alternatives
+- Prioritize clarity and brevity over lengthy explanations 
+- Do not guarantee admission, scholarship approval, or placement in any major.
 </guidelines>
 """)
     
@@ -474,7 +487,7 @@ async def main():
         page_icon="🎓",
         layout="wide",
     )
-    # Global UI styling
+        # Global UI styling
     st.markdown(
         """
         <style>
@@ -486,7 +499,7 @@ async def main():
         }
         /* Make sidebar narrower */
         [data-testid="stSidebar"] {
-            width: 260px !important;
+            width: 270px !important;
         }
         /* Tighter radio spacing in sidebar for chat list */
         div[role="radiogroup"] > label {
@@ -509,6 +522,7 @@ async def main():
         """,
         unsafe_allow_html=True,
     )
+
 
     # Ensure vector database exists
     if not os.path.exists(VECTOR_DB_DIRECTORY):
@@ -615,7 +629,7 @@ async def main():
     # Title and description
     st.title("🎓 LAUpath AI")
     st.markdown("**Your AI guide to Lebanese American University**")
-    st.markdown("Get personalized guidance on admissions, programs, majors, and more!")
+    st.markdown("Personalized support for admissions, programs, majors — and career pathways (⚠️ Please verify all results with an official LAU advisor).")
 
     # Initialize toggle state for profile/tools panel
     if "show_profile_panel" not in st.session_state:
@@ -1192,8 +1206,8 @@ Please use the recommend_major tool with these details to suggest the top 3 spec
                             st.rerun()
 
     # Get user input from chat interface
-    prompt = st.chat_input("Ask me anything about LAU, your profile, or major selection...")
-    
+    prompt = st.chat_input("Ask me anything about LAU, your academic profile, or major selection...")
+   
     if prompt:
         # Add user's message to session state history
         st.session_state.messages.append(HumanMessage(content=prompt))

@@ -60,6 +60,7 @@ def analyze_student_profile(
             "admission_probability": "medium",
             "strengths": [],
             "recommendations": [],
+            "scholarships": [],
             "details": {}
         }
         
@@ -83,9 +84,26 @@ def analyze_student_profile(
         
         analysis["details"]["gpa"] = school_gpa
         
+        # Check for 30% Entrance Scholarship (High School GPA >= 16)
+        if school_gpa >= 16.0:
+            analysis["scholarships"].append({
+                "type": "Entrance Scholarship",
+                "percentage": 30,
+                "reason": "High School GPA ≥ 16"
+            })
+        
         # Analyze Lebanese exam score
         if lebanese_exam_score is not None:
-            if lebanese_exam_score >= 15.0:
+            if lebanese_exam_score >= 18.0:
+                analysis["strengths"].append("Excellent Lebanese Baccalaureate results")
+                analysis["scholarships"].append({
+                    "type": "Bac Scholarship",
+                    "percentage": 50,
+                    "reason": "Lebanese Baccalaureate ≥ 18"
+                })
+                if analysis["eligibility"] == "pending":
+                    analysis["eligibility"] = "high"
+            elif lebanese_exam_score >= 15.0:
                 analysis["strengths"].append("Excellent Lebanese Baccalaureate results")
                 if analysis["eligibility"] == "pending":
                     analysis["eligibility"] = "high"
@@ -148,29 +166,51 @@ def analyze_student_profile(
         
         # Generate summary
         summary_parts = [f"**Student Profile Analysis**\n\n"]
-        summary_parts.append(f"**Eligibility Status:** {analysis['eligibility'].upper()}\n")
-        summary_parts.append(f"**Admission Probability:** {analysis['admission_probability'].upper()}\n\n")
         
-        if analysis["strengths"]:
-            summary_parts.append("**Academic Strengths:**\n")
-            for strength in analysis["strengths"]:
-                summary_parts.append(f"✓ {strength}\n")
-            summary_parts.append("\n")
+        # Scholarships section - list all eligible scholarships
+        if analysis["scholarships"]:
+            # Determine which scholarship the student will receive (highest percentage)
+            eligible_scholarships = sorted(analysis["scholarships"], key=lambda x: x["percentage"], reverse=True)
+            highest_scholarship = eligible_scholarships[0]
+            
+            summary_parts.append("🎓 **Scholarship:**  \n")
+            summary_parts.append("You will get:  \n")
+            
+            # List all eligible scholarships with their grade requirements as bullet points
+            for sch in eligible_scholarships:
+                if "Bac" in sch['type']:
+                    summary_parts.append(f"\n• Bac Scholarship (50%) - {sch['reason']}  \n")
+                elif "Entrance" in sch['type']:
+                    summary_parts.append(f"\n • Entrance Scholarship (30%) - {sch['reason']}  \n")
+                else:
+                    summary_parts.append(f"\n • {sch['type']} ({sch['percentage']}%) - {sch['reason']}  \n")
+            
+            summary_parts.append(f"  \nBut you will receive the highest one which is **{highest_scholarship['percentage']}%**.  \n\n")
         
+        # Remedial English section - only show if required
         if analysis["remedial_english_required"]:
-            summary_parts.append("⚠️ **Remedial English Required:** Yes\n\n")
-        else:
-            summary_parts.append("✓ **Remedial English Required:** No\n\n")
-        
-        if analysis["recommendations"]:
-            summary_parts.append("**Recommendations:**\n")
-            for rec in analysis["recommendations"]:
-                summary_parts.append(f"• {rec}\n")
-            summary_parts.append("\n")
-        
-        summary_parts.append("**Profile Details:**\n")
-        for key, value in analysis["details"].items():
-            summary_parts.append(f"- {key.replace('_', ' ').title()}: {value}\n")
+            english_details = analysis["details"].get("english_proficiency", {})
+            if isinstance(english_details, dict):
+                english_type = english_details.get("type", "").upper()
+                english_score = english_details.get("score", "")
+                
+                # Get the display name for the test type
+                if english_type == "DUOLINGO":
+                    test_name = "Duolingo"
+                    threshold = "105"
+                elif english_type == "TOEFL":
+                    test_name = "TOEFL"
+                    threshold = "80"
+                elif english_type == "IELTS":
+                    test_name = "IELTS"
+                    threshold = "6.5"
+                else:
+                    test_name = english_details.get("type", "English proficiency test")
+                    threshold = "required threshold"
+                
+                summary_parts.append(f"⚠️ **Remedial English:** Based on your {test_name} score ({english_score}), you need to do remedial English. You need a score higher than {threshold} to waive it.\n")
+            else:
+                summary_parts.append("⚠️ **Remedial English:** Based on your English score, you need to do remedial English. You need a score higher than 105 (Duolingo), 80 (TOEFL), or 6.5 (IELTS) to waive it.\n")
         
         return "".join(summary_parts)
     
