@@ -100,23 +100,6 @@ Run the setup script:
 python setup_rag.py
 ```
 
-This script performs the following operations:
-1. **Loads PDF Documents**: Extracts text from all PDF files in `data/lau_documents/`
-2. **Chunks Documents**: Splits documents into manageable segments (1000 characters with 200-character overlap)
-3. **Generates Embeddings**: Creates vector embeddings using Google's embedding model
-4. **Stores in ChromaDB**: Persists embeddings in the `vector_db/` directory
-
-**Expected Output**: The script will display progress messages indicating:
-- Number of PDF files found
-- Number of document chunks created
-- Successful creation of the vector database
-- Location of the stored database (`vector_db/` directory)
-
-**Processing Time**: This step typically takes 2-5 minutes depending on:
-- Number and size of PDF documents
-- Internet speed (for API calls to generate embeddings)
-- System performance
-
 **Verification**: After completion, verify that the `vector_db/` directory was created and contains database files.
 
 #### Step 6: Run the Application
