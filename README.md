@@ -1,8 +1,8 @@
-## 3. Installation and Setup Instructions
+## Installation and Setup Instructions
 
 This section provides comprehensive step-by-step instructions for installing and setting up the LAUpath AI project environment. Following these instructions will ensure that all dependencies are correctly installed, the system is properly configured, and the application is ready for use.
 
-### 3.1 Prerequisites
+### 1 Prerequisites
 
 Before beginning the installation process, ensure that the following prerequisites are met:
 
@@ -22,7 +22,7 @@ Before beginning the installation process, ensure that the following prerequisit
    - At least 500MB free disk space for dependencies and vector database
    - Internet connection for downloading dependencies and API access
 
-### 3.2 Step-by-Step Installation Process
+### 2 Step-by-Step Installation Process
 
 #### Step 1: Obtain Project Files
 
